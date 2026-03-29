@@ -1,0 +1,35 @@
+# Git
+.git
+.gitignore
+.gitmodules
+
+# Dependencies (rebuilt inside container)
+node_modules
+venv
+.venv
+__pycache__
+*.pyc
+*.egg-info
+
+# CI/CD
+.github
+
+# Environment files (user mounts their own)
+.env
+
+# Test / dev artifacts
+tests
+.pytest_cache
+.mypy_cache
+htmlcov
+.coverage
+
+# Worktrees
+.worktrees
+
+# RL training (optional, not needed in default image)
+tinker-atropos
+environments
+
+# Docs site
+website
