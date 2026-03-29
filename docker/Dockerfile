@@ -45,7 +45,7 @@ RUN npx playwright install --with-deps chromium
 # ============================================================================
 FROM python:3.11-slim AS runtime
 
-LABEL maintainer="Brandon Mechling <brandon@phatt.tech>"
+LABEL maintainer="PHATT TECH <brandon@phatt.tech>"
 LABEL description="Hermes Agent — Nous Research AI agent, Unraid-optimized Docker image"
 LABEL version="0.5.0"
 
