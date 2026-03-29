@@ -6,6 +6,11 @@ on:
     - cron: '0 0 * * *'
   workflow_dispatch:  # Allow manual trigger
 
+# Prevent the workflow from triggering itself
+concurrency:
+  group: sync-fork
+  cancel-in-progress: true
+
 jobs:
   sync:
     runs-on: ubuntu-latest

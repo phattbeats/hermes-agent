@@ -178,7 +178,7 @@ A multi-arch Docker image is available for Unraid and Docker-native deployments.
 
 In Unraid Docker settings, add container using:
 ```
-docker.io/phatttech/hermes-agent-unraid:latest
+docker.io/phattbeats/hermes-agent:latest
 ```
 
 Or use Docker Compose:
@@ -187,19 +187,19 @@ Or use Docker Compose:
 version: "3.8"
 services:
   hermes-agent:
-    image: docker.io/phatttech/hermes-agent-unraid:latest
+    image: docker.io/phattbeats/hermes-agent:latest
     container_name: hermes-agent
     restart: unless-stopped
     ports:
-      - "4000:4000"   # TCP broker
-      - "5000:5000"   # Gateway
+      - "4077:4077"   # TCP broker (Caduceus — Hermes staff)
+      - "5177:5177"   # Gateway (Olympian — Mount Olympus)
     environment:
       - HERMES_HOME=/data
       - PYTHONUNBUFFERED=1
     volumes:
       - hermes_data:/data
     healthcheck:
-      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.connect(('127.0.0.1',4000)); s.close()"]
+      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.connect(('127.0.0.1',4077)); s.close()"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -243,8 +243,8 @@ docker build -f docker/Dockerfile -t hermes-agent-unraid:latest .
 
 | Port | Protocol | Purpose |
 |------|----------|---------|
-| 4000 | TCP | Hermes TCP broker |
-| 5000 | TCP | Hermes gateway |
+| 4077 | TCP | Hermes TCP broker (Caduceus — Hermes staff) |
+| 5177 | TCP | Hermes gateway (Olympian — Mount Olympus) |
 
 ### Persistence
 

@@ -45,8 +45,8 @@ RUN npx playwright install --with-deps chromium
 # ============================================================================
 FROM python:3.11-slim AS runtime
 
-LABEL maintainer="PHATT TECH <brandon@phatt.tech>"
-LABEL description="Hermes Agent — Nous Research AI agent, Unraid-optimized"
+LABEL maintainer="Brandon Mechling <brandon@phatt.tech>"
+LABEL description="Hermes Agent — Nous Research AI agent, Unraid-optimized Docker image"
 LABEL version="0.5.0"
 
 # Install runtime dependencies only
@@ -81,11 +81,11 @@ RUN groupadd -r hermes && useradd -r -g hermes hermes && \
 WORKDIR /app/hermes
 
 # Expose ports
-EXPOSE 4000 5000
+EXPOSE 4077 5177
 
 # Healthcheck — ping the TCP broker port
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD python -c "import socket; s=socket.socket(); s.connect(('127.0.0.1',4000)); s.close()" || exit 1
+    CMD python -c "import socket; s=socket.socket(); s.connect(('127.0.0.1',4077)); s.close()" || exit 1
 
 # Switch to non-root
 USER hermes

@@ -12,7 +12,7 @@ on:
 env:
   REGISTRY: docker.io
   # Change this to your Docker Hub username before pushing
-  IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/hermes-agent-unraid
+  IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/hermes-agent
 
 jobs:
   build:
