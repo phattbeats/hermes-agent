@@ -9,6 +9,7 @@ runs at a time if multiple processes overlap.
 """
 
 import asyncio
+import concurrent.futures
 import json
 import logging
 import os
@@ -26,6 +27,7 @@ except ImportError:
         msvcrt = None
 from pathlib import Path
 from hermes_constants import get_hermes_home
+from hermes_cli.config import load_config
 from typing import Optional
 
 from hermes_time import now as _hermes_now
@@ -86,6 +88,22 @@ def _resolve_delivery_target(job: dict) -> Optional[dict]:
             chat_id, thread_id = rest.split(":", 1)
         else:
             chat_id, thread_id = rest, None
+
+        # Resolve human-friendly labels like "Alice (dm)" to real IDs.
+        # send_message(action="list") shows labels with display suffixes
+        # that aren't valid platform IDs (e.g. WhatsApp JIDs).
+        try:
+            from gateway.channel_directory import resolve_channel_name
+            target = chat_id
+            # Strip display suffix like " (dm)" or " (group)"
+            if target.endswith(")") and " (" in target:
+                target = target.rsplit(" (", 1)[0].strip()
+            resolved = resolve_channel_name(platform_name.lower(), target)
+            if resolved:
+                chat_id = resolved
+        except Exception:
+            pass
+
         return {
             "platform": platform_name,
             "chat_id": chat_id,
@@ -145,6 +163,8 @@ def _deliver_result(job: dict, content: str) -> None:
         "mattermost": Platform.MATTERMOST,
         "homeassistant": Platform.HOMEASSISTANT,
         "dingtalk": Platform.DINGTALK,
+        "feishu": Platform.FEISHU,
+        "wecom": Platform.WECOM,
         "email": Platform.EMAIL,
         "sms": Platform.SMS,
     }
@@ -164,18 +184,29 @@ def _deliver_result(job: dict, content: str) -> None:
         logger.warning("Job '%s': platform '%s' not configured/enabled", job["id"], platform_name)
         return
 
-    # Wrap the content so the user knows this is a cron delivery and that
-    # the interactive agent has no visibility into it.
-    task_name = job.get("name", job["id"])
-    wrapped = (
-        f"Cronjob Response: {task_name}\n"
-        f"-------------\n\n"
-        f"{content}\n\n"
-        f"Note: The agent cannot see this message, and therefore cannot respond to it."
-    )
+    # Optionally wrap the content with a header/footer so the user knows this
+    # is a cron delivery.  Wrapping is on by default; set cron.wrap_response: false
+    # in config.yaml for clean output.
+    wrap_response = True
+    try:
+        user_cfg = load_config()
+        wrap_response = user_cfg.get("cron", {}).get("wrap_response", True)
+    except Exception:
+        pass
+
+    if wrap_response:
+        task_name = job.get("name", job["id"])
+        delivery_content = (
+            f"Cronjob Response: {task_name}\n"
+            f"-------------\n\n"
+            f"{content}\n\n"
+            f"Note: The agent cannot see this message, and therefore cannot respond to it."
+        )
+    else:
+        delivery_content = content
 
     # Run the async send in a fresh event loop (safe from any thread)
-    coro = _send_to_platform(platform, pconfig, chat_id, wrapped, thread_id=thread_id)
+    coro = _send_to_platform(platform, pconfig, chat_id, delivery_content, thread_id=thread_id)
     try:
         result = asyncio.run(coro)
     except RuntimeError:
@@ -186,7 +217,7 @@ def _deliver_result(job: dict, content: str) -> None:
         coro.close()
         import concurrent.futures
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(asyncio.run, _send_to_platform(platform, pconfig, chat_id, wrapped, thread_id=thread_id))
+            future = pool.submit(asyncio.run, _send_to_platform(platform, pconfig, chat_id, delivery_content, thread_id=thread_id))
             result = future.result(timeout=30)
     except Exception as e:
         logger.error("Job '%s': delivery to %s:%s failed: %s", job["id"], platform_name, chat_id, e)
@@ -206,11 +237,12 @@ def _build_job_prompt(job: dict) -> str:
     # Always prepend [SILENT] guidance so the cron agent can suppress
     # delivery when it has nothing new or noteworthy to report.
     silent_hint = (
-        "[SYSTEM: If you have nothing new or noteworthy to report, respond "
-        "with exactly \"[SILENT]\" (optionally followed by a brief internal "
-        "note). This suppresses delivery to the user while still saving "
-        "output locally. Only use [SILENT] when there are genuinely no "
-        "changes worth reporting.]\n\n"
+        "[SYSTEM: If you have a meaningful status report or findings, "
+        "send them — that is the whole point of this job. Only respond "
+        "with exactly \"[SILENT]\" (nothing else) when there is genuinely "
+        "nothing new to report. [SILENT] suppresses delivery to the user. "
+        "Never combine [SILENT] with content — either report your "
+        "findings normally, or say [SILENT] and nothing more.]\n\n"
     )
     prompt = silent_hint + prompt
     if skills is None:
@@ -308,7 +340,7 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
             if delivery_target.get("thread_id") is not None:
                 os.environ["HERMES_CRON_AUTO_DELIVER_THREAD_ID"] = str(delivery_target["thread_id"])
 
-        model = job.get("model") or os.getenv("HERMES_MODEL") or "anthropic/claude-opus-4.6"
+        model = job.get("model") or os.getenv("HERMES_MODEL") or ""
 
         # Load config.yaml for model, reasoning, prefill, toolsets, provider routing
         _cfg = {}
@@ -406,13 +438,36 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
             provider_sort=pr.get("sort"),
             disabled_toolsets=["cronjob", "messaging", "clarify"],
             quiet_mode=True,
+            skip_memory=True,  # Cron system prompts would corrupt user representations
             platform="cron",
             session_id=_cron_session_id,
             session_db=_session_db,
         )
         
-        result = agent.run_conversation(prompt)
-        
+        # Run the agent with a timeout so a hung API call or tool doesn't
+        # block the cron ticker thread indefinitely.  Default 10 minutes;
+        # override via env var.  Uses a separate thread because
+        # run_conversation is synchronous.
+        _cron_timeout = float(os.getenv("HERMES_CRON_TIMEOUT", 600))
+        _cron_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        _cron_future = _cron_pool.submit(agent.run_conversation, prompt)
+        try:
+            result = _cron_future.result(timeout=_cron_timeout)
+        except concurrent.futures.TimeoutError:
+            logger.error(
+                "Job '%s' timed out after %.0fs — interrupting agent",
+                job_name, _cron_timeout,
+            )
+            if hasattr(agent, "interrupt"):
+                agent.interrupt("Cron job timed out")
+            _cron_pool.shutdown(wait=False, cancel_futures=True)
+            raise TimeoutError(
+                f"Cron job '{job_name}' timed out after "
+                f"{int(_cron_timeout // 60)} minutes"
+            )
+        finally:
+            _cron_pool.shutdown(wait=False)
+
         final_response = result.get("final_response", "") or ""
         # Use a separate variable for log display; keep final_response clean
         # for delivery logic (empty response = no delivery).
