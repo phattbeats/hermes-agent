@@ -64,10 +64,10 @@ jobs:
         if: steps.check.outputs.has_changes == 'true'
         id: new_tag
         run: |
-          # Get the latest tag from upstream
-          UPSTREAM_TAG=$(git describe --tags upstream/main 2>/dev/null | sed 's/^v//')
+          # Get the latest tag from upstream (exact tag, not git describe)
+          UPSTREAM_TAG=$(git tag --sort=-version:refname | grep -E '^v[0-9]' | head -1)
           echo "Latest upstream tag: $UPSTREAM_TAG"
-          echo "tag=v${UPSTREAM_TAG:-latest}" >> $GITHUB_OUTPUT
+          echo "tag=${UPSTREAM_TAG:-latest}" >> $GITHUB_OUTPUT
 
       - name: Tag and push version tag
         if: steps.check.outputs.has_changes == 'true' && steps.new_tag.outputs.tag != ''
