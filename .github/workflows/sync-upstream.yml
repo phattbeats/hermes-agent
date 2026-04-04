@@ -16,6 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      workflows: write
     outputs:
       merged: ${{ steps.merged.outputs.result }}
       new_tag: ${{ steps.new_tag.outputs.tag }}
