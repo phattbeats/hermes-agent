@@ -60,7 +60,6 @@ try:
         CreateMessageRequestBody,
         GetChatRequest,
         GetMessageRequest,
-        GetImageRequest,
         GetMessageResourceRequest,
         P2ImMessageMessageReadV1,
         ReplyMessageRequest,
@@ -386,10 +385,6 @@ def _coerce_int(value: Any, default: Optional[int] = None, min_value: int = 0) -
 def _coerce_required_int(value: Any, default: int, min_value: int = 0) -> int:
     parsed = _coerce_int(value, default=default, min_value=min_value)
     return default if parsed is None else parsed
-
-
-def _is_loop_ready(loop: Optional[asyncio.AbstractEventLoop]) -> bool:
-    return loop is not None and not bool(getattr(loop, "is_closed", lambda: False)())
 
 
 # ---------------------------------------------------------------------------
@@ -2070,10 +2065,7 @@ class FeishuAdapter(BasePlatformAdapter):
         existing.media_urls.extend(event.media_urls)
         existing.media_types.extend(event.media_types)
         if event.text:
-            if not existing.text:
-                existing.text = event.text
-            elif event.text not in existing.text.split("\n\n"):
-                existing.text = f"{existing.text}\n\n{event.text}"
+            existing.text = self._merge_caption(existing.text, event.text)
         existing.timestamp = event.timestamp
         if event.message_id:
             existing.message_id = event.message_id
@@ -2117,6 +2109,10 @@ class FeishuAdapter(BasePlatformAdapter):
         default_ext: str,
         preferred_name: str,
     ) -> tuple[str, str]:
+        from tools.url_safety import is_safe_url
+        if not is_safe_url(file_url):
+            raise ValueError(f"Blocked unsafe URL (SSRF protection): {file_url[:80]}")
+
         import httpx
 
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
